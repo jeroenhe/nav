@@ -93,6 +93,17 @@
   .copy-feedback { font-size: 12px; color: var(--forest); text-align: center; min-height: 16px; }
   .wp-map { width: 100%; height: 220px; border-radius: 4px; margin-top: 8px; border: 1px solid var(--line); }
   .map-hint { font-size: 11px; color: #8a8068; margin: 6px 0 0; }
+
+  /* spelscherm: weergaveschakelaar + kaart */
+  .view-toggle { display: flex; gap: 0; border: 1px solid var(--forest-light); border-radius: 4px; overflow: hidden; }
+  .toggle-btn { width: auto; flex: 1; padding: 9px 22px; background: transparent; color: var(--forest); text-transform: uppercase; font-size: 12px; letter-spacing: 0.06em; border-radius: 0; }
+  .toggle-btn.active { background: var(--forest); color: #fdfbf4; }
+  .game-map { width: 260px; height: 260px; border-radius: 50%; border: 2px solid var(--forest); overflow: hidden;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.04), 0 2px 10px rgba(0,0,0,0.08); }
+  .game-map .leaflet-container { background: #e8e1cd; }
+  /* eigen markers */
+  .me-dot { width: 16px; height: 16px; background: var(--rust); border: 2px solid #fdfbf4; border-radius: 50%; box-shadow: 0 0 0 3px rgba(181,83,43,0.25); }
+  .target-pin { width: 18px; height: 18px; background: var(--forest); border: 2px solid #fdfbf4; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
 </style>
 </head>
 <body>
@@ -150,7 +161,12 @@
     <p class="clue-text" id="clue-text"></p>
   </div>
 
-  <div class="compass-wrap">
+  <div class="view-toggle">
+    <button class="toggle-btn active" id="view-compass-btn">Kompas</button>
+    <button class="toggle-btn" id="view-map-btn">Kaart</button>
+  </div>
+
+  <div class="compass-wrap" id="compass-view">
     <div class="dial" id="dial">
       <div class="needle-pivot" id="needle-pivot">
         <div class="needle">
@@ -161,6 +177,8 @@
       </div>
     </div>
   </div>
+
+  <div class="game-map hidden" id="game-map"></div>
 
   <div class="distance">
     <div class="num" id="distance-num">&mdash;</div>
@@ -260,6 +278,16 @@ let currentIndex = 0;
 let lastHeading = null;
 let arrived = false;
 
+// kaartweergave (spelscherm)
+let gameMap = null;
+let meMarker = null;
+let targetMarker = null;
+let routeLine = null;
+let arrowDecorator = null;
+let mapInitialised = false;
+let currentView = 'compass';
+let mapAutoFitted = false;
+
 function buildDialTicks() {
   const dial = el('dial');
   for (let deg = 0; deg < 360; deg += 30) {
@@ -332,6 +360,8 @@ function refreshDisplay() {
     arrived = false;
     el('found-card').classList.add('hidden');
   }
+
+  if (currentView === 'map') updateMap();
 }
 
 function scheduleRefresh() {
@@ -397,11 +427,104 @@ function enableCompass() {
   }
 }
 
+/* ---------- kaartweergave in het spelscherm ---------- */
+const ME_ICON = L.divIcon({ className: '', html: '<div class="me-dot"></div>', iconSize: [16, 16], iconAnchor: [8, 8] });
+const TARGET_ICON = L.divIcon({ className: '', html: '<div class="target-pin"></div>', iconSize: [18, 18], iconAnchor: [9, 16] });
+
+// kleine pijl als roterend divIcon, gebruikt om langs de stippellijn te wijzen
+function arrowIcon(angleDeg) {
+  return L.divIcon({
+    className: '',
+    html: `<div style="transform:rotate(${angleDeg}deg);width:0;height:0;
+            border-left:5px solid transparent;border-right:5px solid transparent;
+            border-bottom:11px solid #2f4a3c;opacity:0.8;"></div>`,
+    iconSize: [10, 11], iconAnchor: [5, 6]
+  });
+}
+
+let arrowMarkers = [];
+
+function ensureMap() {
+  if (mapInitialised) return;
+  gameMap = L.map('game-map', { zoomControl: true, attributionControl: true });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap'
+  }).addTo(gameMap);
+  const wp = WAYPOINTS[currentIndex];
+  gameMap.setView([wp.lat, wp.lng], 16);
+  mapInitialised = true;
+}
+
+function updateMap() {
+  if (!mapInitialised) return;
+  const wp = WAYPOINTS[currentIndex];
+  const targetLatLng = [wp.lat, wp.lng];
+
+  // doelmarker
+  if (!targetMarker) targetMarker = L.marker(targetLatLng, { icon: TARGET_ICON }).addTo(gameMap);
+  else targetMarker.setLatLng(targetLatLng);
+
+  if (lastPos) {
+    const meLatLng = [lastPos.lat, lastPos.lng];
+
+    // eigen positie
+    if (!meMarker) meMarker = L.marker(meLatLng, { icon: ME_ICON }).addTo(gameMap);
+    else meMarker.setLatLng(meLatLng);
+
+    // dunne stippellijn tussen mij en het doel
+    if (!routeLine) {
+      routeLine = L.polyline([meLatLng, targetLatLng], {
+        color: '#2f4a3c', weight: 1.5, opacity: 0.8, dashArray: '4 6'
+      }).addTo(gameMap);
+    } else {
+      routeLine.setLatLngs([meLatLng, targetLatLng]);
+    }
+
+    // dunne pijltjes langs de lijn die naar het doel wijzen
+    arrowMarkers.forEach(m => gameMap.removeLayer(m));
+    arrowMarkers = [];
+    const angle = bearingTo(lastPos.lat, lastPos.lng, wp.lat, wp.lng); // 0 = noord
+    const cssAngle = angle; // divIcon-pijl wijst standaard omhoog (noord), dus draai gelijk aan kompasrichting
+    for (let t = 0.25; t < 1; t += 0.25) {
+      const lat = lastPos.lat + (wp.lat - lastPos.lat) * t;
+      const lng = lastPos.lng + (wp.lng - lastPos.lng) * t;
+      const m = L.marker([lat, lng], { icon: arrowIcon(cssAngle), interactive: false }).addTo(gameMap);
+      arrowMarkers.push(m);
+    }
+
+    // beeld één keer passend maken zodat beide punten zichtbaar zijn;
+    // daarna mag de gebruiker vrij pannen/zoomen
+    if (!mapAutoFitted) {
+      gameMap.fitBounds(L.latLngBounds([meLatLng, targetLatLng]).pad(0.4), { maxZoom: 18, animate: false });
+      mapAutoFitted = true;
+    }
+  } else {
+    gameMap.setView(targetLatLng, 16);
+  }
+}
+
+function setView(view) {
+  currentView = view;
+  const showMap = view === 'map';
+  el('compass-view').classList.toggle('hidden', showMap);
+  el('game-map').classList.toggle('hidden', !showMap);
+  el('view-compass-btn').classList.toggle('active', !showMap);
+  el('view-map-btn').classList.toggle('active', showMap);
+  if (showMap) {
+    ensureMap();
+    // Leaflet moet zijn afmetingen opnieuw berekenen nadat de container zichtbaar werd
+    setTimeout(() => { gameMap.invalidateSize(); updateMap(); }, 50);
+  }
+}
+
 function advanceStage() {
   currentIndex += 1;
   if (currentIndex >= WAYPOINTS.length) { showFinal(); return; }
   localStorage.setItem(STORAGE_KEY, String(currentIndex));
   loadWaypoint();
+  mapAutoFitted = false;
+  if (currentView === 'map') updateMap();
 }
 function showFinal() {
   el('final-text').textContent = FINAL_MESSAGE;
@@ -447,6 +570,9 @@ function initGame(huntData) {
   });
   el('reset-btn').addEventListener('click', resetHunt);
   el('final-restart').addEventListener('click', resetHunt);
+
+  el('view-compass-btn').addEventListener('click', () => setView('compass'));
+  el('view-map-btn').addEventListener('click', () => setView('map'));
 }
 
 /* ============================================================
