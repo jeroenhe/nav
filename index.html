@@ -1,1 +1,534 @@
 <!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>Speurtocht</title>
+<meta property="og:title" content="Speurtocht — je hebt een aanwijzing gekregen">
+<meta property="og:description" content="Open dit op je telefoon om te beginnen met navigeren.">
+<style>
+  :root {
+    --paper: #f1ead8;
+    --paper-dark: #e3d8bd;
+    --ink: #2b2a23;
+    --forest: #2f4a3c;
+    --forest-light: #4d6f5b;
+    --rust: #b5532b;
+    --rust-light: #d97a4d;
+    --line: #c7b896;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'Courier New', ui-monospace, monospace;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    min-height: 100vh;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 0 0 32px;
+    background-image:
+      radial-gradient(circle at 15% 20%, rgba(47,74,60,0.05) 0, transparent 45%),
+      radial-gradient(circle at 85% 75%, rgba(181,83,43,0.06) 0, transparent 45%);
+  }
+  .topo { position: fixed; inset: 0; z-index: -1; opacity: 0.5; pointer-events: none; }
+  header {
+    width: 100%; text-align: center; padding: 22px 16px 14px;
+    border-bottom: 1px solid var(--line); background: var(--paper-dark);
+  }
+  .eyebrow { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--forest); margin: 0 0 4px; }
+  h1 { margin: 0; font-family: Georgia, 'Times New Roman', serif; font-weight: 700; font-size: 26px; }
+  .stage-tag { margin-top: 6px; font-size: 12px; color: var(--rust); }
+  main { width: 100%; max-width: 420px; padding: 20px 18px 0; display: flex; flex-direction: column; align-items: center; gap: 18px; }
+  .card { width: 100%; background: #fdfbf4; border: 1px solid var(--line); border-radius: 4px; padding: 16px 18px; }
+  .clue-label { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--forest); margin: 0 0 6px; }
+  .clue-text { margin: 0; font-family: Georgia, serif; font-size: 16px; line-height: 1.5; }
+  .compass-wrap { position: relative; width: 260px; height: 260px; margin: 6px 0; }
+  .dial { width: 100%; height: 100%; border-radius: 50%; background: #fdfbf4; border: 2px solid var(--forest);
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.04), 0 2px 10px rgba(0,0,0,0.08); position: relative; }
+  .tick { position: absolute; left: 50%; top: 4px; width: 1px; height: 10px; background: var(--forest-light); transform-origin: 50% 126px; }
+  .tick.major { height: 16px; background: var(--forest); width: 2px; }
+  .dial-label { position: absolute; font-size: 12px; font-weight: bold; color: var(--forest); }
+  .needle-pivot { position: absolute; inset: 0; transition: transform 0.15s linear; }
+  .needle { position: absolute; left: 50%; top: 50%; width: 0; height: 0; }
+  .needle-point { position: absolute; width: 0; height: 0; border-left: 13px solid transparent; border-right: 13px solid transparent;
+    border-bottom: 100px solid var(--rust); left: -13px; top: -100px; filter: drop-shadow(0 2px 2px rgba(0,0,0,0.2)); }
+  .needle-tail { position: absolute; width: 0; height: 0; border-left: 8px solid transparent; border-right: 8px solid transparent;
+    border-top: 46px solid var(--forest-light); left: -8px; top: 0; }
+  .needle-hub { position: absolute; width: 16px; height: 16px; left: -8px; top: -8px; background: var(--ink); border-radius: 50%; border: 2px solid var(--paper); }
+  .distance { text-align: center; }
+  .distance .num { font-family: Georgia, serif; font-size: 48px; font-weight: 700; line-height: 1; }
+  .distance .unit { font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--forest); }
+  .accuracy { font-size: 11px; color: #8a8068; margin-top: 4px; }
+  .status-line { font-size: 13px; text-align: center; color: var(--forest); min-height: 18px; }
+  button { font-family: inherit; font-size: 14px; letter-spacing: 0.04em; border: none; border-radius: 4px; padding: 14px 20px; cursor: pointer; width: 100%; }
+  .btn-primary { background: var(--rust); color: #fdfbf4; text-transform: uppercase; font-weight: bold; }
+  .btn-primary:disabled { background: #cbbfa3; color: #8a8068; cursor: not-allowed; }
+  .btn-secondary { background: transparent; color: var(--forest); border: 1px solid var(--forest-light); margin-top: 8px; }
+  .btn-ghost { background: transparent; color: #8a8068; text-decoration: underline; font-size: 12px; padding: 6px; width: auto; }
+  .code-row { display: flex; gap: 8px; margin-top: 10px; }
+  .code-row input { flex: 1; font-family: inherit; font-size: 16px; padding: 12px; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
+  .overlay { position: fixed; inset: 0; background: rgba(43,42,35,0.92); color: #fdfbf4; display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 50; text-align: center; }
+  .overlay-inner h2 { font-family: Georgia, serif; font-size: 22px; }
+  .hidden { display: none !important; }
+  .final { text-align: center; }
+  .final .num { font-family: Georgia, serif; font-size: 30px; margin-bottom: 6px; }
+  footer { font-size: 11px; color: #8a8068; margin-top: 24px; text-align: center; padding: 0 20px; }
+
+  /* builder */
+  .wp-row { border: 1px solid var(--line); border-radius: 4px; padding: 12px; margin-bottom: 12px; background: #fff; }
+  .wp-row label { display: block; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--forest); margin: 10px 0 4px; }
+  .wp-row label:first-child { margin-top: 0; }
+  .wp-row input, .wp-row textarea { width: 100%; font-family: inherit; font-size: 14px; padding: 9px; border: 1px solid var(--line); border-radius: 4px; background: #fdfbf4; }
+  .wp-row textarea { resize: vertical; min-height: 50px; }
+  .latlng-row { display: flex; gap: 8px; align-items: flex-end; }
+  .latlng-row > div { flex: 1; }
+  .use-here-btn { width: auto; white-space: nowrap; padding: 9px 12px; font-size: 12px; background: var(--forest); color: #fdfbf4; }
+  .wp-remove { width: auto; background: transparent; color: var(--rust); text-decoration: underline; font-size: 12px; padding: 4px; margin-top: 8px; }
+  .link-output { width: 100%; font-family: inherit; font-size: 13px; padding: 10px; border: 1px solid var(--line); border-radius: 4px; background: #fff; word-break: break-all; }
+  .copy-feedback { font-size: 12px; color: var(--forest); text-align: center; min-height: 16px; }
+</style>
+</head>
+<body>
+
+<svg class="topo" viewBox="0 0 400 800" preserveAspectRatio="none">
+  <g fill="none" stroke="#2f4a3c" stroke-width="1">
+    <path d="M -20 100 Q 100 60 200 110 T 420 90" />
+    <path d="M -20 160 Q 100 120 200 170 T 420 150" />
+    <path d="M -20 600 Q 120 560 220 610 T 420 590" />
+    <path d="M -20 660 Q 120 630 220 670 T 420 650" />
+  </g>
+</svg>
+
+<header>
+  <p class="eyebrow" id="eyebrow">Speurtocht</p>
+  <h1 id="hunt-title">Laden&hellip;</h1>
+  <p class="stage-tag" id="stage-tag"></p>
+</header>
+
+<!-- ============ BUILDER SCHERM ============ -->
+<main id="builder-screen" class="hidden">
+  <div class="card">
+    <label style="display:block;font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:var(--forest);margin-bottom:4px;">Naam van de speurtocht</label>
+    <input type="text" id="b-title" value="Mijn speurtocht" style="width:100%;font-family:inherit;font-size:15px;padding:10px;border:1px solid var(--line);border-radius:4px;">
+  </div>
+
+  <div id="wp-list" style="width:100%;"></div>
+
+  <button class="btn-secondary" id="b-add-wp">+ Aanwijspunt toevoegen</button>
+
+  <div class="card">
+    <label style="display:block;font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:var(--forest);margin-bottom:4px;">Slotbericht (getoond na het laatste aanwijspunt)</label>
+    <textarea id="b-final" style="width:100%;font-family:inherit;font-size:14px;padding:9px;border:1px solid var(--line);border-radius:4px;min-height:50px;">Goed gedaan — je hebt het einde gehaald!</textarea>
+  </div>
+
+  <button class="btn-primary" id="b-generate">Link genereren</button>
+
+  <div class="card hidden" id="b-output-card">
+    <p class="clue-label">Deel deze link</p>
+    <textarea class="link-output" id="b-link-output" rows="3" readonly></textarea>
+    <button class="btn-secondary" id="b-copy">Link kopiëren</button>
+    <p class="copy-feedback" id="b-copy-feedback"></p>
+  </div>
+
+  <p style="font-size:11px;color:#8a8068;text-align:center;">
+    Tip: ga op elke verstopplek staan en tik op "Gebruik mijn locatie" in plaats van coördinaten zelf in te typen.
+  </p>
+</main>
+
+<!-- ============ SPELSCHERM ============ -->
+<main id="game-screen" class="hidden">
+
+  <div class="card">
+    <p class="clue-label">Aanwijzing</p>
+    <p class="clue-text" id="clue-text"></p>
+  </div>
+
+  <div class="compass-wrap">
+    <div class="dial" id="dial">
+      <div class="needle-pivot" id="needle-pivot">
+        <div class="needle">
+          <div class="needle-point"></div>
+          <div class="needle-tail"></div>
+          <div class="needle-hub"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="distance">
+    <div class="num" id="distance-num">&mdash;</div>
+    <div class="unit">meter te gaan</div>
+    <div class="accuracy" id="accuracy-text"></div>
+  </div>
+
+  <div class="status-line" id="status-line">Tik hieronder om te beginnen met volgen.</div>
+
+  <button class="btn-primary" id="start-btn">Start navigatie</button>
+
+  <div class="card hidden" id="found-card">
+    <p class="clue-label">Je bent dichtbij</p>
+    <p class="clue-text">Kijk om je heen &mdash; je staat er nu zo goed als op.</p>
+    <div id="code-section" class="hidden">
+      <div class="code-row">
+        <input type="text" id="code-input" placeholder="Voer de gevonden code in" autocomplete="off" autocapitalize="characters">
+      </div>
+      <button class="btn-secondary" id="code-submit">Code versturen</button>
+      <p class="status-line" id="code-feedback"></p>
+    </div>
+    <button class="btn-primary" id="found-btn" style="margin-top:10px;">Gevonden &mdash; volgende aanwijzing</button>
+  </div>
+
+  <button class="btn-ghost" id="reset-btn">Speurtocht opnieuw starten</button>
+</main>
+
+<div class="overlay hidden" id="ios-permission-overlay">
+  <div class="overlay-inner">
+    <h2>Eén tik om het kompas in te schakelen</h2>
+    <p>Je telefoon heeft toestemming nodig om de richtingssensor te gebruiken.</p>
+    <button class="btn-primary" id="ios-permission-btn" style="margin-top:14px;">Kompas inschakelen</button>
+  </div>
+</div>
+
+<div class="overlay hidden" id="final-overlay">
+  <div class="overlay-inner final">
+    <h2 id="final-title">Speurtocht voltooid</h2>
+    <p id="final-text"></p>
+    <button class="btn-secondary" id="final-restart" style="margin-top:16px;">Opnieuw spelen</button>
+  </div>
+</div>
+
+<footer>
+  Houd je telefoon ongeveer vlak voor de beste kompaslezing. Afstanden gebruiken de GPS van je telefoon, die meestal nauwkeurig is tot een paar meter &mdash; niet centimeters.
+</footer>
+
+<script>
+/* ---------- coderen/decoderen van speurtochtdata in de URL-hash ---------- */
+function encodeHunt(obj) {
+  const json = JSON.stringify(obj);
+  const b64 = btoa(unescape(encodeURIComponent(json)));
+  return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function decodeHunt(str) {
+  let b64 = str.replace(/-/g, '+').replace(/_/g, '/');
+  while (b64.length % 4) b64 += '=';
+  const json = decodeURIComponent(escape(atob(b64)));
+  return JSON.parse(json);
+}
+function simpleHash(str) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) { h = (h * 31 + str.charCodeAt(i)) | 0; }
+  return Math.abs(h).toString(36);
+}
+
+const el = (id) => document.getElementById(id);
+
+/* ---------- gedeelde wiskunde ---------- */
+function haversineDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const toRad = (d) => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 +
+            Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+function bearingTo(lat1, lon1, lat2, lon2) {
+  const toRad = (d) => d * Math.PI / 180;
+  const toDeg = (r) => r * 180 / Math.PI;
+  const dLon = toRad(lon2 - lon1);
+  const y = Math.sin(dLon) * Math.cos(toRad(lat2));
+  const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
+            Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLon);
+  return (toDeg(Math.atan2(y, x)) + 360) % 360;
+}
+
+/* ============================================================
+   SPELMODUS — actief zodra de URL een #hash met speurtochtdata heeft
+   ============================================================ */
+let HUNT_TITLE = "Speurtocht";
+let WAYPOINTS = [];
+let FINAL_MESSAGE = "Goed gedaan!";
+let STORAGE_KEY = "speurtocht-voortgang";
+let currentIndex = 0;
+let lastHeading = null;
+let arrived = false;
+
+function buildDialTicks() {
+  const dial = el('dial');
+  for (let deg = 0; deg < 360; deg += 30) {
+    const major = deg % 90 === 0;
+    const tick = document.createElement('div');
+    tick.className = 'tick' + (major ? ' major' : '');
+    tick.style.transform = `rotate(${deg}deg)`;
+    dial.appendChild(tick);
+  }
+  const labels = [['N', 0], ['O', 90], ['Z', 180], ['W', 270]];
+  const radius = 110;
+  labels.forEach(([txt, deg]) => {
+    const rad = (deg - 90) * Math.PI / 180;
+    const x = 130 + radius * Math.cos(rad) - 7;
+    const y = 130 + radius * Math.sin(rad) - 8;
+    const lbl = document.createElement('div');
+    lbl.className = 'dial-label';
+    lbl.textContent = txt;
+    lbl.style.left = x + 'px';
+    lbl.style.top = y + 'px';
+    dial.appendChild(lbl);
+  });
+}
+
+function loadWaypoint() {
+  const wp = WAYPOINTS[currentIndex];
+  el('hunt-title').textContent = HUNT_TITLE;
+  el('stage-tag').textContent = `Fase ${currentIndex + 1} van ${WAYPOINTS.length}`;
+  el('clue-text').textContent = wp.clue;
+  el('found-card').classList.add('hidden');
+  el('code-section').classList.toggle('hidden', !wp.code);
+  el('code-feedback').textContent = '';
+  el('code-input').value = '';
+  arrived = false;
+}
+
+function updateNavigation(lat, lng, accuracy) {
+  const wp = WAYPOINTS[currentIndex];
+  const dist = haversineDistance(lat, lng, wp.lat, wp.lng);
+  const bearing = bearingTo(lat, lng, wp.lat, wp.lng);
+
+  el('distance-num').textContent = dist < 1000 ? Math.round(dist) : (dist / 1000).toFixed(2) + 'k';
+  el('accuracy-text').textContent = `GPS-nauwkeurigheid: ±${Math.round(accuracy)}m`;
+
+  if (lastHeading !== null) {
+    const rotation = (bearing - lastHeading + 360) % 360;
+    el('needle-pivot').style.transform = `rotate(${rotation}deg)`;
+    el('status-line').textContent = '';
+  } else {
+    el('status-line').textContent = 'Beweeg je telefoon in een achtvorm om het kompas te activeren.';
+  }
+
+  if (dist <= wp.radius && !arrived) {
+    arrived = true;
+    el('found-card').classList.remove('hidden');
+  } else if (dist > wp.radius && arrived) {
+    arrived = false;
+    el('found-card').classList.add('hidden');
+  }
+}
+
+function startGeolocation() {
+  if (!('geolocation' in navigator)) {
+    el('status-line').textContent = 'Deze browser heeft geen locatieondersteuning.';
+    return;
+  }
+  navigator.geolocation.watchPosition(
+    (pos) => updateNavigation(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy || 999),
+    (err) => { el('status-line').textContent = 'Locatiefout: ' + err.message + '. Controleer of locatietoegang is toegestaan voor deze site.'; },
+    { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 }
+  );
+}
+
+function handleOrientation(event) {
+  let heading = null;
+  if (typeof event.webkitCompassHeading === 'number') {
+    heading = event.webkitCompassHeading;
+  } else if (typeof event.alpha === 'number') {
+    heading = (360 - event.alpha) % 360;
+  }
+  if (heading !== null) lastHeading = heading;
+}
+
+function enableCompass() {
+  const needsIOSPermission = typeof DeviceOrientationEvent !== 'undefined' &&
+    typeof DeviceOrientationEvent.requestPermission === 'function';
+  if (needsIOSPermission) {
+    el('ios-permission-overlay').classList.remove('hidden');
+    el('ios-permission-btn').onclick = () => {
+      DeviceOrientationEvent.requestPermission().then((state) => {
+        el('ios-permission-overlay').classList.add('hidden');
+        if (state === 'granted') window.addEventListener('deviceorientation', handleOrientation, true);
+        else el('status-line').textContent = 'Kompastoestemming geweigerd — de afstand wordt nog steeds bijgewerkt.';
+      }).catch(() => el('ios-permission-overlay').classList.add('hidden'));
+    };
+  } else if ('ondeviceorientationabsolute' in window) {
+    window.addEventListener('deviceorientationabsolute', handleOrientation, true);
+  } else if ('ondeviceorientation' in window) {
+    window.addEventListener('deviceorientation', handleOrientation, true);
+  } else {
+    el('status-line').textContent = 'Geen kompassensor gevonden op dit toestel — de afstand wordt nog steeds bijgewerkt.';
+  }
+}
+
+function advanceStage() {
+  currentIndex += 1;
+  if (currentIndex >= WAYPOINTS.length) { showFinal(); return; }
+  localStorage.setItem(STORAGE_KEY, String(currentIndex));
+  loadWaypoint();
+}
+function showFinal() {
+  el('final-text').textContent = FINAL_MESSAGE;
+  el('final-overlay').classList.remove('hidden');
+  localStorage.removeItem(STORAGE_KEY);
+}
+function resetHunt() {
+  currentIndex = 0;
+  localStorage.removeItem(STORAGE_KEY);
+  loadWaypoint();
+  el('final-overlay').classList.add('hidden');
+}
+
+function initGame(huntData) {
+  HUNT_TITLE = huntData.title || "Speurtocht";
+  WAYPOINTS = huntData.waypoints || [];
+  FINAL_MESSAGE = huntData.final || "Goed gedaan!";
+  STORAGE_KEY = "speurtocht-voortgang-" + simpleHash(location.hash);
+
+  const saved = parseInt(localStorage.getItem(STORAGE_KEY) || "0", 10);
+  currentIndex = (!isNaN(saved) && saved >= 0 && saved < WAYPOINTS.length) ? saved : 0;
+
+  el('builder-screen').classList.add('hidden');
+  el('game-screen').classList.remove('hidden');
+  buildDialTicks();
+  loadWaypoint();
+
+  el('start-btn').addEventListener('click', () => {
+    el('start-btn').disabled = true;
+    el('start-btn').textContent = 'Volgen…';
+    enableCompass();
+    startGeolocation();
+  });
+  el('found-btn').addEventListener('click', () => {
+    if (WAYPOINTS[currentIndex].code) return;
+    advanceStage();
+  });
+  el('code-submit').addEventListener('click', () => {
+    const wp = WAYPOINTS[currentIndex];
+    const val = el('code-input').value.trim().toLowerCase();
+    if (val === wp.code.toLowerCase()) advanceStage();
+    else el('code-feedback').textContent = 'Niet helemaal — probeer het opnieuw.';
+  });
+  el('reset-btn').addEventListener('click', resetHunt);
+  el('final-restart').addEventListener('click', resetHunt);
+}
+
+/* ============================================================
+   BUILDER-MODUS — actief zolang er nog geen #hash is
+   ============================================================ */
+let wpCounter = 0;
+
+function addWaypointRow(data) {
+  data = data || {};
+  const id = 'wp' + (wpCounter++);
+  const row = document.createElement('div');
+  row.className = 'wp-row';
+  row.dataset.id = id;
+  row.innerHTML = `
+    <label>Naam aanwijspunt</label>
+    <input type="text" class="f-name" value="${data.name || ''}" placeholder="bijv. Tweede aanwijzing">
+
+    <label>Coördinaten</label>
+    <div class="latlng-row">
+      <div><input type="text" class="f-lat" placeholder="breedtegraad" value="${data.lat ?? ''}"></div>
+      <div><input type="text" class="f-lng" placeholder="lengtegraad" value="${data.lng ?? ''}"></div>
+      <button class="use-here-btn">Gebruik mijn locatie</button>
+    </div>
+
+    <label>Aanwijzingstekst</label>
+    <textarea class="f-clue">${data.clue || ''}</textarea>
+
+    <label>Code om volgende fase te ontgrendelen (optioneel)</label>
+    <input type="text" class="f-code" value="${data.code || ''}" placeholder="leeg laten om gewoon op Gevonden te tikken">
+
+    <label>Aankomstradius (meter)</label>
+    <input type="text" class="f-radius" value="${data.radius || 15}">
+
+    <button class="wp-remove">Verwijder dit aanwijspunt</button>
+  `;
+  row.querySelector('.use-here-btn').addEventListener('click', (e) => {
+    e.preventDefault();
+    if (!('geolocation' in navigator)) { alert('Geen locatieondersteuning op dit toestel/browser.'); return; }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        row.querySelector('.f-lat').value = pos.coords.latitude.toFixed(6);
+        row.querySelector('.f-lng').value = pos.coords.longitude.toFixed(6);
+      },
+      (err) => alert('Kon locatie niet bepalen: ' + err.message),
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  });
+  row.querySelector('.wp-remove').addEventListener('click', (e) => {
+    e.preventDefault();
+    row.remove();
+  });
+  el('wp-list').appendChild(row);
+}
+
+function initBuilder() {
+  el('eyebrow').textContent = 'Speurtocht — Bouwer';
+  el('hunt-title').textContent = 'Bouw een speurtocht';
+  el('stage-tag').textContent = 'Vul aanwijspunten in en genereer dan een deelbare link';
+  el('builder-screen').classList.remove('hidden');
+
+  addWaypointRow({ name: 'Start', clue: 'Loop in de richting van de naald om je eerste aanwijzing te vinden.' });
+
+  el('b-add-wp').addEventListener('click', () => addWaypointRow());
+
+  el('b-generate').addEventListener('click', () => {
+    const rows = document.querySelectorAll('.wp-row');
+    const waypoints = [];
+    let error = '';
+    rows.forEach((row, i) => {
+      const lat = parseFloat(row.querySelector('.f-lat').value);
+      const lng = parseFloat(row.querySelector('.f-lng').value);
+      if (isNaN(lat) || isNaN(lng)) { error = `Aanwijspunt ${i + 1} heeft geen geldige coördinaten.`; return; }
+      waypoints.push({
+        name: row.querySelector('.f-name').value || `Fase ${i + 1}`,
+        lat, lng,
+        clue: row.querySelector('.f-clue').value || '...',
+        code: row.querySelector('.f-code').value || '',
+        radius: parseInt(row.querySelector('.f-radius').value, 10) || 15
+      });
+    });
+    if (error) { alert(error); return; }
+    if (waypoints.length === 0) { alert('Voeg minstens één aanwijspunt toe.'); return; }
+
+    const huntData = {
+      title: el('b-title').value || 'Speurtocht',
+      final: el('b-final').value || 'Goed gedaan!',
+      waypoints
+    };
+    const link = location.origin + location.pathname + '#' + encodeHunt(huntData);
+    el('b-link-output').value = link;
+    el('b-output-card').classList.remove('hidden');
+    el('b-copy-feedback').textContent = '';
+  });
+
+  el('b-copy').addEventListener('click', () => {
+    el('b-link-output').select();
+    navigator.clipboard.writeText(el('b-link-output').value).then(() => {
+      el('b-copy-feedback').textContent = 'Gekopieerd — plak het in WhatsApp.';
+    }).catch(() => {
+      el('b-copy-feedback').textContent = 'Automatisch kopiëren mislukt — selecteer de tekst hierboven en kopieer handmatig.';
+    });
+  });
+}
+
+/* ---------- startpunt ---------- */
+(function () {
+  const hash = location.hash.slice(1);
+  if (hash) {
+    try {
+      const huntData = decodeHunt(hash);
+      initGame(huntData);
+      return;
+    } catch (e) {
+      el('status-line') && (el('status-line').textContent = '');
+      // val terug op de bouwer als de link niet klopt
+    }
+  }
+  initBuilder();
+})();
+</script>
+</body>
+</html>
