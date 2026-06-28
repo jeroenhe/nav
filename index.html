@@ -6,6 +6,8 @@
 <title>Speurtocht</title>
 <meta property="og:title" content="Speurtocht — je hebt een aanwijzing gekregen">
 <meta property="og:description" content="Open dit op je telefoon om te beginnen met navigeren.">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
   :root {
     --paper: #f1ead8;
@@ -51,7 +53,7 @@
   .tick { position: absolute; left: 50%; top: 4px; width: 1px; height: 10px; background: var(--forest-light); transform-origin: 50% 126px; }
   .tick.major { height: 16px; background: var(--forest); width: 2px; }
   .dial-label { position: absolute; font-size: 12px; font-weight: bold; color: var(--forest); }
-  .needle-pivot { position: absolute; inset: 0; transition: transform 0.15s linear; }
+  .needle-pivot { position: absolute; inset: 0; }
   .needle { position: absolute; left: 50%; top: 50%; width: 0; height: 0; }
   .needle-point { position: absolute; width: 0; height: 0; border-left: 13px solid transparent; border-right: 13px solid transparent;
     border-bottom: 100px solid var(--rust); left: -13px; top: -100px; filter: drop-shadow(0 2px 2px rgba(0,0,0,0.2)); }
@@ -89,6 +91,8 @@
   .wp-remove { width: auto; background: transparent; color: var(--rust); text-decoration: underline; font-size: 12px; padding: 4px; margin-top: 8px; }
   .link-output { width: 100%; font-family: inherit; font-size: 13px; padding: 10px; border: 1px solid var(--line); border-radius: 4px; background: #fff; word-break: break-all; }
   .copy-feedback { font-size: 12px; color: var(--forest); text-align: center; min-height: 16px; }
+  .wp-map { width: 100%; height: 220px; border-radius: 4px; margin-top: 8px; border: 1px solid var(--line); }
+  .map-hint { font-size: 11px; color: #8a8068; margin: 6px 0 0; }
 </style>
 </head>
 <body>
@@ -134,7 +138,7 @@
   </div>
 
   <p style="font-size:11px;color:#8a8068;text-align:center;">
-    Tip: ga op elke verstopplek staan en tik op "Gebruik mijn locatie" in plaats van coördinaten zelf in te typen.
+    Tip: gebruik "Gebruik mijn locatie" als je er al staat, of klik op de kaart bij elk aanwijspunt om een locatie te kiezen.
   </p>
 </main>
 
@@ -292,17 +296,30 @@ function loadWaypoint() {
   arrived = false;
 }
 
-function updateNavigation(lat, lng, accuracy) {
+let lastPos = null;          // { lat, lng, accuracy }
+let needleRotation = 0;       // continuous (not wrapped) — avoids the spin-around glitch
+let rafPending = false;
+
+function refreshDisplay() {
+  if (!lastPos) return;
   const wp = WAYPOINTS[currentIndex];
-  const dist = haversineDistance(lat, lng, wp.lat, wp.lng);
-  const bearing = bearingTo(lat, lng, wp.lat, wp.lng);
+  const dist = haversineDistance(lastPos.lat, lastPos.lng, wp.lat, wp.lng);
+  const bearing = bearingTo(lastPos.lat, lastPos.lng, wp.lat, wp.lng);
 
   el('distance-num').textContent = dist < 1000 ? Math.round(dist) : (dist / 1000).toFixed(2) + 'k';
-  el('accuracy-text').textContent = `GPS-nauwkeurigheid: ±${Math.round(accuracy)}m`;
+  el('accuracy-text').textContent = `GPS-nauwkeurigheid: ±${Math.round(lastPos.accuracy)}m`;
 
   if (lastHeading !== null) {
-    const rotation = (bearing - lastHeading + 360) % 360;
-    el('needle-pivot').style.transform = `rotate(${rotation}deg)`;
+    const target = (bearing - lastHeading + 360) % 360;
+    // rotate by the shortest path from the current rotation, instead of
+    // snapping straight to "target deg" (which spins the long way around
+    // every time the bearing crosses the 0/360 boundary)
+    const current = ((needleRotation % 360) + 360) % 360;
+    let delta = target - current;
+    if (delta > 180) delta -= 360;
+    if (delta < -180) delta += 360;
+    needleRotation += delta;
+    el('needle-pivot').style.transform = `rotate(${needleRotation}deg)`;
     el('status-line').textContent = '';
   } else {
     el('status-line').textContent = 'Beweeg je telefoon in een achtvorm om het kompas te activeren.';
@@ -317,13 +334,22 @@ function updateNavigation(lat, lng, accuracy) {
   }
 }
 
+function scheduleRefresh() {
+  if (rafPending) return;
+  rafPending = true;
+  requestAnimationFrame(() => { rafPending = false; refreshDisplay(); });
+}
+
 function startGeolocation() {
   if (!('geolocation' in navigator)) {
     el('status-line').textContent = 'Deze browser heeft geen locatieondersteuning.';
     return;
   }
   navigator.geolocation.watchPosition(
-    (pos) => updateNavigation(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy || 999),
+    (pos) => {
+      lastPos = { lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy || 999 };
+      scheduleRefresh();
+    },
     (err) => { el('status-line').textContent = 'Locatiefout: ' + err.message + '. Controleer of locatietoegang is toegestaan voor deze site.'; },
     { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 }
   );
@@ -336,7 +362,18 @@ function handleOrientation(event) {
   } else if (typeof event.alpha === 'number') {
     heading = (360 - event.alpha) % 360;
   }
-  if (heading !== null) lastHeading = heading;
+  if (heading === null) return;
+
+  if (lastHeading === null) {
+    lastHeading = heading;
+  } else {
+    // exponential smoothing, with correct wrap-around handling around 0/360
+    let diff = heading - lastHeading;
+    if (diff > 180) diff -= 360;
+    if (diff < -180) diff += 360;
+    lastHeading = (lastHeading + diff * 0.25 + 360) % 360;
+  }
+  scheduleRefresh();
 }
 
 function enableCompass() {
@@ -420,6 +457,7 @@ let wpCounter = 0;
 function addWaypointRow(data) {
   data = data || {};
   const id = 'wp' + (wpCounter++);
+  const hasCoords = typeof data.lat === 'number' && typeof data.lng === 'number';
   const row = document.createElement('div');
   row.className = 'wp-row';
   row.dataset.id = id;
@@ -433,6 +471,8 @@ function addWaypointRow(data) {
       <div><input type="text" class="f-lng" placeholder="lengtegraad" value="${data.lng ?? ''}"></div>
       <button class="use-here-btn">Gebruik mijn locatie</button>
     </div>
+    <div class="wp-map" id="map-${id}"></div>
+    <p class="map-hint">Klik op de kaart om de locatie te zetten, of versleep de pin.</p>
 
     <label>Aanwijzingstekst</label>
     <textarea class="f-clue">${data.clue || ''}</textarea>
@@ -445,14 +485,15 @@ function addWaypointRow(data) {
 
     <button class="wp-remove">Verwijder dit aanwijspunt</button>
   `;
+
+  const latInput = row.querySelector('.f-lat');
+  const lngInput = row.querySelector('.f-lng');
+
   row.querySelector('.use-here-btn').addEventListener('click', (e) => {
     e.preventDefault();
     if (!('geolocation' in navigator)) { alert('Geen locatieondersteuning op dit toestel/browser.'); return; }
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        row.querySelector('.f-lat').value = pos.coords.latitude.toFixed(6);
-        row.querySelector('.f-lng').value = pos.coords.longitude.toFixed(6);
-      },
+      (pos) => placePoint(pos.coords.latitude, pos.coords.longitude, true),
       (err) => alert('Kon locatie niet bepalen: ' + err.message),
       { enableHighAccuracy: true, timeout: 10000 }
     );
@@ -462,6 +503,53 @@ function addWaypointRow(data) {
     row.remove();
   });
   el('wp-list').appendChild(row);
+
+  // ---- OSM-kaart voor dit aanwijspunt ----
+  const DEFAULT_CENTER = [52.211, 5.970]; // generieke startpositie, wordt overschreven door echte locatie indien beschikbaar
+  const startCenter = hasCoords ? [data.lat, data.lng] : DEFAULT_CENTER;
+  const startZoom = hasCoords ? 16 : 13;
+
+  const map = L.map(`map-${id}`).setView(startCenter, startZoom);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>-bijdragers'
+  }).addTo(map);
+
+  let marker = hasCoords ? L.marker(startCenter, { draggable: true }).addTo(map) : null;
+  if (marker) marker.on('dragend', () => placePoint(marker.getLatLng().lat, marker.getLatLng().lng, false));
+
+  function placePoint(lat, lng, recenterMap) {
+    latInput.value = lat.toFixed(6);
+    lngInput.value = lng.toFixed(6);
+    if (marker) {
+      marker.setLatLng([lat, lng]);
+    } else {
+      marker = L.marker([lat, lng], { draggable: true }).addTo(map);
+      marker.on('dragend', () => placePoint(marker.getLatLng().lat, marker.getLatLng().lng, false));
+    }
+    if (recenterMap) map.setView([lat, lng], Math.max(map.getZoom(), 16));
+  }
+
+  map.on('click', (e) => placePoint(e.latlng.lat, e.latlng.lng, false));
+
+  // handmatig getypte coördinaten ook op de kaart laten zien
+  function syncFromInputs() {
+    const lat = parseFloat(latInput.value);
+    const lng = parseFloat(lngInput.value);
+    if (!isNaN(lat) && !isNaN(lng)) placePoint(lat, lng, true);
+  }
+  latInput.addEventListener('change', syncFromInputs);
+  lngInput.addEventListener('change', syncFromInputs);
+
+  // als er nog geen coördinaten zijn, centreer de kaart bij voorkeur op de
+  // werkelijke huidige locatie in plaats van de generieke standaardpositie
+  if (!hasCoords && 'geolocation' in navigator) {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => { if (!marker) map.setView([pos.coords.latitude, pos.coords.longitude], 14); },
+      () => {},
+      { timeout: 5000 }
+    );
+  }
 }
 
 function initBuilder() {
